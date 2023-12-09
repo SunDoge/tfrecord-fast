@@ -1,0 +1,19 @@
+[package]
+name = "tfrecord-fast"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "tfrecord_fast"
+crate-type = ["cdylib"]
+
+[dependencies]
+crc32c = "0.6.4"
+numpy = "0.20.0"
+prost = "0.12.3"
+pyo3 = "0.20.0"
+thiserror = "1.0.50"
+
+[dev-dependencies]
+prost-build = "0.12.3"
