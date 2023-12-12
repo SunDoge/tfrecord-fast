@@ -1,14 +1,15 @@
 use crate::{
     constants::{U32_SIZE, U64_SIZE},
     tensorflow::{
-        bytes_list_to_pyarray, feature::Kind, float_list_to_pyarray, int64_list_to_pyarray, Example,
+        bytes_list_to_pyarray, feature::Kind, float_list_to_pyarray, int64_list_to_pyarray,
+        Example, SequenceExample,
     },
 };
 use fastrand::Rng;
 use prost::Message;
 use pyo3::{prelude::*, types::PyDict};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{BufReader, Read},
 };
@@ -78,16 +79,21 @@ pub struct MessageDecoder {
     keys: Option<Vec<String>>,
 }
 
-pub type FeatureMap = HashMap<String, Kind>;
+pub enum Feature {
+    List(Kind),
+    Lists(Vec<Kind>),
+}
+pub type FeatureMap = HashMap<String, Feature>;
 
 impl MessageDecoder {
     pub fn new(reader: TfRecordReader, keys: Option<Vec<String>>) -> Self {
+        let keys = keys.map(|keys| (keys, keys.iter().cloned().collect()));
         Self { reader, keys }
     }
 
-    pub fn read_example(&mut self) -> anyhow::Result<Option<Example>> {
+    pub fn read_example(&mut self) -> anyhow::Result<Option<SequenceExample>> {
         let example = match self.reader.read_content()? {
-            Some(buf) => Some(Example::decode(buf)?),
+            Some(buf) => Some(SequenceExample::decode(buf)?),
             None => None,
         };
         Ok(example)
@@ -99,29 +105,57 @@ impl MessageDecoder {
             None => None,
             Some(mut example) => match self.keys {
                 None => {
-                    let feature_map = example
-                        .features
-                        .expect("no features")
-                        .feature
-                        .into_iter()
-                        .map(|(k, v)| (k, v.kind.expect("no kind")))
-                        .collect();
+                    let mut feature_map = HashMap::new();
+                    example.context.map(|c| {
+                        c.feature.into_iter().for_each(|(k, v)| {
+                            feature_map.insert(k, Feature::List(v.kind.expect("no kind")));
+                        });
+                    });
+                    example.feature_lists.map(|f| {
+                        f.feature_list.into_iter().for_each(|(k, v)| {
+                            feature_map.insert(
+                                k,
+                                Feature::Lists(
+                                    v.feature
+                                        .into_iter()
+                                        .map(|x| x.kind.expect("no kind"))
+                                        .collect(),
+                                ),
+                            );
+                        });
+                    });
                     Some(feature_map)
                 }
                 Some(ref keys) => {
-                    let feature_map = keys
-                        .iter()
-                        .map(|key| {
-                            let (k, v) = example
-                                .features
-                                .as_mut()
-                                .expect("no features")
-                                .feature
-                                .remove_entry(key)
-                                .expect("key not in example");
-                            (k, v.kind.expect("no kind"))
-                        })
-                        .collect();
+                    let mut feature_map = HashMap::new();
+
+                    // let key_set: HashSet<_> = keys.iter().map(|x| x).collect();
+                    // let rest_keys: HashSet<_> = example
+                    //     .context
+                    //     .map(|c| {
+                    //         let context_keys: HashSet<&str> =
+                    //             c.feature.keys().map(|x| x.as_str()).collect();
+                    //         key_set.difference(&context_keys).collect()
+                    //     })
+                    //     .unwrap_or(key_set);
+
+                    // let context_keys: HashSet<&str> = example.context.map(|c| {
+                    //     c.feature.keys().collect()
+                    // });
+
+                    // let feature_map = keys
+                    //     .iter()
+                    //     .map(|key| {
+                    //         let (k, v) = example
+                    //             .features
+                    //             .as_mut()
+                    //             .expect("no features")
+                    //             .feature
+                    //             .remove_entry(key)
+                    //             .expect("key not in example");
+                    //         (k, v.kind.expect("no kind"))
+                    //     })
+                    //     .collect();
                     Some(feature_map)
                 }
             },
