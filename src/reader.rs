@@ -215,28 +215,28 @@ impl NumpyTfRecordReader {
         Ok(Self { reader })
     }
 
-    pub fn read_next(&mut self, py: Python) -> PyResult<Option<Py<PyDict>>> {
+    pub fn read_next<'a>(&mut self, py: Python<'a>) -> Option<&'a PyDict> {
         match self.reader.read_next() {
-            None => Ok(None),
+            None => None,
             Some(fm) => {
-                let dict = PyDict::new(py);
-                for (key, value) in fm.into_iter() {
+                let dict = fm.into_iter().fold(PyDict::new(py), |dict, (key, value)| {
                     match value {
                         Kind::FloatList(float_list) => {
                             let arr = float_list_to_pyarray(py, float_list);
-                            dict.set_item(key, arr)?;
+                            dict.set_item(key, arr).expect("fail to add float list");
                         }
                         Kind::Int64List(int64_list) => {
                             let arr = int64_list_to_pyarray(py, int64_list);
-                            dict.set_item(key, arr)?;
+                            dict.set_item(key, arr).expect("fail to add int64 list");
                         }
                         Kind::BytesList(bytes_list) => {
                             let arrs = bytes_list_to_pyarray(py, bytes_list);
-                            dict.set_item(key, arrs)?;
+                            dict.set_item(key, arrs).expect("fail to add bytes list");
                         }
                     }
-                }
-                Ok(Some(dict.into()))
+                    dict
+                });
+                Some(dict)
             }
         }
     }

@@ -1,7 +1,7 @@
 include!("proto/tensorflow.rs");
 
 use numpy::PyArray1;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyList};
 
 impl Example {}
 
@@ -13,10 +13,13 @@ pub fn int64_list_to_pyarray<'a>(py: Python<'a>, int64_list: Int64List) -> &'a P
     PyArray1::from_vec(py, int64_list.value)
 }
 
-pub fn bytes_list_to_pyarray<'a>(py: Python<'a>, bytes_list: BytesList) -> Vec<&'a PyArray1<u8>> {
+pub fn bytes_list_to_pyarray<'a>(py: Python<'a>, bytes_list: BytesList) -> &'a PyList {
     bytes_list
         .value
         .into_iter()
-        .map(move |buf| PyArray1::from_vec(py, buf))
-        .collect()
+        .fold(PyList::empty(py), |list, buf| {
+            list.append(PyArray1::from_vec(py, buf))
+                .expect("fail to append");
+            list
+        })
 }
