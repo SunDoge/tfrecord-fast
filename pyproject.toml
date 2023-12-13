@@ -5,7 +5,9 @@ description = "Add your description here"
 authors = [
     { name = "SunDoge", email = "384813529@qq.com" }
 ]
-dependencies = []
+dependencies = [
+    "numpy>=1.16.0",
+]
 readme = "README.md"
 requires-python = ">= 3.8"
 
@@ -17,6 +19,10 @@ build-backend = "maturin"
 managed = true
 dev-dependencies = [
     "pip>=23.3.1",
+    "maturin>=1.4.0",
+    "tfrecord>=1.14.4",
+    "ipython>=8.12.3",
+    "protobuf>=3.20,<3.21"
 ]
 
 [tool.maturin]

@@ -7,5 +7,30 @@
 #   all-features: false
 
 -e file:.
+asttokens==2.4.1
+backcall==0.2.0
+crc32c==2.3.post0
+decorator==5.1.1
+executing==2.0.1
+ipython==8.12.3
+jedi==0.19.1
+matplotlib-inline==0.1.6
+maturin==1.4.0
+numpy==1.24.4
+parso==0.8.3
+pexpect==4.9.0
+pickleshare==0.7.5
+prompt-toolkit==3.0.42
+protobuf==3.20.3
+ptyprocess==0.7.0
+pure-eval==0.2.2
+pygments==2.17.2
+six==1.16.0
+stack-data==0.6.3
+tfrecord==1.14.4
+tomli==2.0.1
+traitlets==5.14.0
+typing-extensions==4.9.0
+wcwidth==0.2.12
 # The following packages are considered to be unsafe in a requirements file:
 pip==23.3.1

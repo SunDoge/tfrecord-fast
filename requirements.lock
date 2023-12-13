@@ -7,3 +7,4 @@
 #   all-features: false
 
 -e file:.
+numpy==1.24.4

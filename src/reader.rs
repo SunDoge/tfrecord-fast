@@ -80,7 +80,7 @@ impl TfRecordReader {
 pub struct MessageDecoder {
     reader: TfRecordReader,
     context_keys: Option<Vec<String>>,
-    feature_list_keys: Option<Vec<String>>,
+    sequence_keys: Option<Vec<String>>,
 }
 
 pub type FeatureMap = HashMap<String, Kind>;
@@ -90,12 +90,12 @@ impl MessageDecoder {
     pub fn new(
         reader: TfRecordReader,
         context_keys: Option<Vec<String>>,
-        feature_list_keys: Option<Vec<String>>,
+        sequence_keys: Option<Vec<String>>,
     ) -> Self {
         Self {
             reader,
             context_keys,
-            feature_list_keys,
+            sequence_keys,
         }
     }
 
@@ -136,7 +136,7 @@ impl MessageDecoder {
                 };
 
                 let feature_list_map: Option<FeatureListMap> =
-                    match (example.feature_lists, &self.feature_list_keys) {
+                    match (example.feature_lists, &self.sequence_keys) {
                         (Some(mut f), Some(keys)) => Some(
                             keys.iter()
                                 .map(|k| {
@@ -251,7 +251,7 @@ impl NumpyTfRecordReader {
         shuffle_buffer_size: usize,
         reader_buffer_size: Option<usize>,
         context_keys: Option<Vec<String>>,
-        feature_list_keys: Option<Vec<String>>,
+        sequence_keys: Option<Vec<String>>,
         shuffle_seed: Option<u64>,
     ) -> anyhow::Result<Self> {
         let file = File::open(path)?;
@@ -260,7 +260,7 @@ impl NumpyTfRecordReader {
             Some(size) => BufReader::with_capacity(size, file),
         };
         let reader = TfRecordReader::new(reader, check_integrity)?;
-        let reader = MessageDecoder::new(reader, context_keys, feature_list_keys);
+        let reader = MessageDecoder::new(reader, context_keys, sequence_keys);
         let reader = Shuffler::new(reader, shuffle_buffer_size, shuffle_seed);
 
         Ok(Self { reader })
@@ -290,6 +290,16 @@ impl NumpyTfRecordReader {
                 Some((feature_dict, feature_list_dict))
             }
         }
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+    fn __next__<'a>(
+        mut slf: PyRefMut<'_, Self>,
+        py: Python<'a>,
+    ) -> Option<(Option<&'a PyDict>, Option<&'a PyDict>)> {
+        slf.read_next(py)
     }
 }
 
