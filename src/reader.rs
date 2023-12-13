@@ -2,14 +2,17 @@ use crate::{
     constants::{U32_SIZE, U64_SIZE},
     tensorflow::{
         bytes_list_to_pyarray, feature::Kind, float_list_to_pyarray, int64_list_to_pyarray,
-        Example, SequenceExample,
+        SequenceExample,
     },
 };
 use fastrand::Rng;
 use prost::Message;
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyList},
+};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::File,
     io::{BufReader, Read},
 };
@@ -76,19 +79,24 @@ impl TfRecordReader {
 #[derive(Debug)]
 pub struct MessageDecoder {
     reader: TfRecordReader,
-    keys: Option<Vec<String>>,
+    context_keys: Option<Vec<String>>,
+    feature_list_keys: Option<Vec<String>>,
 }
 
-pub enum Feature {
-    List(Kind),
-    Lists(Vec<Kind>),
-}
-pub type FeatureMap = HashMap<String, Feature>;
+pub type FeatureMap = HashMap<String, Kind>;
+pub type FeatureListMap = HashMap<String, Vec<Kind>>;
 
 impl MessageDecoder {
-    pub fn new(reader: TfRecordReader, keys: Option<Vec<String>>) -> Self {
-        let keys = keys.map(|keys| (keys, keys.iter().cloned().collect()));
-        Self { reader, keys }
+    pub fn new(
+        reader: TfRecordReader,
+        context_keys: Option<Vec<String>>,
+        feature_list_keys: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            reader,
+            context_keys,
+            feature_list_keys,
+        }
     }
 
     pub fn read_example(&mut self) -> anyhow::Result<Option<SequenceExample>> {
@@ -99,72 +107,80 @@ impl MessageDecoder {
         Ok(example)
     }
 
-    pub fn read_by_keys(&mut self) -> Option<FeatureMap> {
+    pub fn read_by_keys(&mut self) -> Option<(Option<FeatureMap>, Option<FeatureListMap>)> {
         let example = self.read_example().expect("no example");
         match example {
             None => None,
-            Some(mut example) => match self.keys {
-                None => {
-                    let mut feature_map = HashMap::new();
-                    example.context.map(|c| {
-                        c.feature.into_iter().for_each(|(k, v)| {
-                            feature_map.insert(k, Feature::List(v.kind.expect("no kind")));
-                        });
-                    });
-                    example.feature_lists.map(|f| {
-                        f.feature_list.into_iter().for_each(|(k, v)| {
-                            feature_map.insert(
-                                k,
-                                Feature::Lists(
-                                    v.feature
+            Some(example) => {
+                let feature_map: Option<FeatureMap> = match (example.context, &self.context_keys) {
+                    (Some(mut c), Some(keys)) => Some(
+                        keys.iter()
+                            .map(|k| {
+                                c.feature
+                                    .remove_entry(k)
+                                    .map(|(k, v)| (k, v.kind.expect("no kind")))
+                                    .expect("no such entry")
+                            })
+                            .collect(),
+                    ),
+                    (Some(c), None) => Some(
+                        c.feature
+                            .into_iter()
+                            .map(|(k, v)| (k, v.kind.expect("no kind")))
+                            .collect(),
+                    ),
+                    (None, Some(_)) => {
+                        panic!("no context");
+                    }
+                    (None, None) => None,
+                };
+
+                let feature_list_map: Option<FeatureListMap> =
+                    match (example.feature_lists, &self.feature_list_keys) {
+                        (Some(mut f), Some(keys)) => Some(
+                            keys.iter()
+                                .map(|k| {
+                                    f.feature_list
+                                        .remove_entry(k)
+                                        .map(|(k, v)| {
+                                            (
+                                                k,
+                                                v.feature
+                                                    .into_iter()
+                                                    .map(|x| x.kind.expect("no kind"))
+                                                    .collect(),
+                                            )
+                                        })
+                                        .expect("no such entry")
+                                })
+                                .collect(),
+                        ),
+                        (Some(f), None) => Some(
+                            f.feature_list
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    let kinds = v
+                                        .feature
                                         .into_iter()
                                         .map(|x| x.kind.expect("no kind"))
-                                        .collect(),
-                                ),
-                            );
-                        });
-                    });
-                    Some(feature_map)
-                }
-                Some(ref keys) => {
-                    let mut feature_map = HashMap::new();
-
-                    // let key_set: HashSet<_> = keys.iter().map(|x| x).collect();
-                    // let rest_keys: HashSet<_> = example
-                    //     .context
-                    //     .map(|c| {
-                    //         let context_keys: HashSet<&str> =
-                    //             c.feature.keys().map(|x| x.as_str()).collect();
-                    //         key_set.difference(&context_keys).collect()
-                    //     })
-                    //     .unwrap_or(key_set);
-
-                    // let context_keys: HashSet<&str> = example.context.map(|c| {
-                    //     c.feature.keys().collect()
-                    // });
-
-                    // let feature_map = keys
-                    //     .iter()
-                    //     .map(|key| {
-                    //         let (k, v) = example
-                    //             .features
-                    //             .as_mut()
-                    //             .expect("no features")
-                    //             .feature
-                    //             .remove_entry(key)
-                    //             .expect("key not in example");
-                    //         (k, v.kind.expect("no kind"))
-                    //     })
-                    //     .collect();
-                    Some(feature_map)
-                }
-            },
+                                        .collect();
+                                    (k, kinds)
+                                })
+                                .collect(),
+                        ),
+                        (None, Some(_)) => {
+                            panic!("no context");
+                        }
+                        (None, None) => None,
+                    };
+                Some((feature_map, feature_list_map))
+            }
         }
     }
 }
 
 impl Iterator for &mut MessageDecoder {
-    type Item = FeatureMap;
+    type Item = (Option<FeatureMap>, Option<FeatureListMap>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.read_by_keys()
@@ -174,7 +190,7 @@ impl Iterator for &mut MessageDecoder {
 #[derive(Debug)]
 pub struct Shuffler {
     reader: MessageDecoder,
-    buffer: Vec<FeatureMap>,
+    buffer: Vec<(Option<FeatureMap>, Option<FeatureListMap>)>,
     buffer_size: usize,
     rng: Rng,
 }
@@ -195,7 +211,7 @@ impl Shuffler {
         });
     }
 
-    pub fn read_next(&mut self) -> Option<FeatureMap> {
+    pub fn read_next(&mut self) -> Option<(Option<FeatureMap>, Option<FeatureListMap>)> {
         if self.buffer_size == 0 {
             return self.reader.read_by_keys();
         }
@@ -234,7 +250,8 @@ impl NumpyTfRecordReader {
         check_integrity: bool,
         shuffle_buffer_size: usize,
         reader_buffer_size: Option<usize>,
-        keys: Option<Vec<String>>,
+        context_keys: Option<Vec<String>>,
+        feature_list_keys: Option<Vec<String>>,
         shuffle_seed: Option<u64>,
     ) -> anyhow::Result<Self> {
         let file = File::open(path)?;
@@ -243,35 +260,73 @@ impl NumpyTfRecordReader {
             Some(size) => BufReader::with_capacity(size, file),
         };
         let reader = TfRecordReader::new(reader, check_integrity)?;
-        let reader = MessageDecoder::new(reader, keys);
+        let reader = MessageDecoder::new(reader, context_keys, feature_list_keys);
         let reader = Shuffler::new(reader, shuffle_buffer_size, shuffle_seed);
 
         Ok(Self { reader })
     }
 
-    pub fn read_next<'a>(&mut self, py: Python<'a>) -> Option<&'a PyDict> {
+    pub fn read_next<'a>(
+        &mut self,
+        py: Python<'a>,
+    ) -> Option<(Option<&'a PyDict>, Option<&'a PyDict>)> {
         match self.reader.read_next() {
             None => None,
-            Some(fm) => {
-                let dict = fm.into_iter().fold(PyDict::new(py), |dict, (key, value)| {
-                    match value {
-                        Kind::FloatList(float_list) => {
-                            let arr = float_list_to_pyarray(py, float_list);
-                            dict.set_item(key, arr).expect("fail to add float list");
-                        }
-                        Kind::Int64List(int64_list) => {
-                            let arr = int64_list_to_pyarray(py, int64_list);
-                            dict.set_item(key, arr).expect("fail to add int64 list");
-                        }
-                        Kind::BytesList(bytes_list) => {
-                            let arrs = bytes_list_to_pyarray(py, bytes_list);
-                            dict.set_item(key, arrs).expect("fail to add bytes list");
-                        }
-                    }
-                    dict
+            Some((feature_map, feature_list_map)) => {
+                let feature_dict = feature_map.map(|fm| {
+                    fm.into_iter().fold(PyDict::new(py), |dict, (k, v)| {
+                        udpate_dict(k, v, py, dict);
+                        dict
+                    })
                 });
-                Some(dict)
+
+                let feature_list_dict = feature_list_map.map(|fm| {
+                    fm.into_iter().fold(PyDict::new(py), |dict, (k, v)| {
+                        update_list_dict(k, v, py, dict);
+                        dict
+                    })
+                });
+
+                Some((feature_dict, feature_list_dict))
             }
         }
     }
+}
+
+pub fn udpate_dict(key: String, value: Kind, py: Python<'_>, dict: &PyDict) {
+    match value {
+        Kind::FloatList(float_list) => {
+            let arr = float_list_to_pyarray(py, float_list);
+            dict.set_item(key, arr).expect("fail to add float list");
+        }
+        Kind::Int64List(int64_list) => {
+            let arr = int64_list_to_pyarray(py, int64_list);
+            dict.set_item(key, arr).expect("fail to add int64 list");
+        }
+        Kind::BytesList(bytes_list) => {
+            let arrs = bytes_list_to_pyarray(py, bytes_list);
+            dict.set_item(key, arrs).expect("fail to add bytes list");
+        }
+    }
+}
+
+pub fn update_list_dict(key: String, value: Vec<Kind>, py: Python<'_>, dict: &PyDict) {
+    let arrs = value.into_iter().fold(PyList::empty(py), |list, v| {
+        match v {
+            Kind::FloatList(float_list) => {
+                let arr = float_list_to_pyarray(py, float_list);
+                list.append(arr).expect("fail to add float list");
+            }
+            Kind::Int64List(int64_list) => {
+                let arr = int64_list_to_pyarray(py, int64_list);
+                list.append(arr).expect("fail to add float list");
+            }
+            Kind::BytesList(bytes_list) => {
+                let arrs = bytes_list_to_pyarray(py, bytes_list);
+                list.append(arrs).expect("fail to add float list");
+            }
+        }
+        list
+    });
+    dict.set_item(key, arrs).expect("fail to set item");
 }
