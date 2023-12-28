@@ -58,4 +58,9 @@ impl RustTfRecordWriter {
             Ok(())
         })
     }
+
+    pub fn flush(&mut self) -> anyhow::Result<()> {
+        self.file.flush()?;
+        Ok(())
+    }
 }
