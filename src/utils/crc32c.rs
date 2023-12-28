@@ -11,3 +11,4 @@ pub fn verify_masked_crc(buf: &[u8], expect: u32) -> bool {
     let found = get_masked_crc(buf);
     found == expect
 }
+
